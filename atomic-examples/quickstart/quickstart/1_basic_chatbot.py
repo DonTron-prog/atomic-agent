@@ -7,6 +7,8 @@ from rich.text import Text
 from atomic_agents.lib.components.agent_memory import AgentMemory
 from atomic_agents.agents.base_agent import BaseAgent, BaseAgentConfig, BaseAgentInputSchema, BaseAgentOutputSchema
 
+from dotenv import load_dotenv
+load_dotenv()  # Load environment variables from .env file
 # API Key setup
 API_KEY = ""
 if not API_KEY:

@@ -8,6 +8,9 @@ from rich.live import Live
 from atomic_agents.lib.components.agent_memory import AgentMemory
 from atomic_agents.agents.base_agent import BaseAgent, BaseAgentConfig, BaseAgentInputSchema, BaseAgentOutputSchema
 
+from dotenv import load_dotenv
+load_dotenv()  # Load environment variables from .env file
+
 # API Key setup
 API_KEY = ""
 if not API_KEY:
@@ -59,6 +62,11 @@ async def main():
         if user_input.lower() in ["/exit", "/quit"]:
             console.print("Exiting chat...")
             break
+
+        # Check the memory
+        if user_input.lower() in ["memory", "mem"]:
+            console.print(agent.memory.history, style="bold green")
+            continue
 
         # Process the user's input through the agent and get the streaming response
         input_schema = BaseAgentInputSchema(chat_message=user_input)
