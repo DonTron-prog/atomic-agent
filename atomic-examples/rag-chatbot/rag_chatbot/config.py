@@ -1,5 +1,8 @@
 import os
 from dataclasses import dataclass
+from dotenv import load_dotenv
+
+load_dotenv()  # Load environment variables from .env file
 
 
 def get_api_key() -> str:
