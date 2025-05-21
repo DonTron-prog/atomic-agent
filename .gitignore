@@ -147,3 +147,7 @@ personal_scripts/
 
 # Logs
 debug.log
+
+# packages
+searxng-docker/
+searxng-docker
