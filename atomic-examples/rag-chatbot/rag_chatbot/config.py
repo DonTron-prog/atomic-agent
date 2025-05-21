@@ -32,7 +32,7 @@ CHUNK_SIZE = 1000
 CHUNK_OVERLAP = 200
 
 # Vector Search Configuration
-NUM_CHUNKS_TO_RETRIEVE = 3
+NUM_CHUNKS_TO_RETRIEVE = 6
 SIMILARITY_METRIC = "cosine"
 
 # ChromaDB Configuration

@@ -284,6 +284,13 @@ def chat_loop(chroma_db: ChromaDBService, rag_context: RAGContextProvider) -> No
                 console.print("\n[bold]👋 Goodbye! Thanks for using the Markdown RAG Chatbot.[/bold]")
                 break
 
+            # Check the memory
+            if user_message.lower() in ["memory", "mem"]:
+                console.print(query_agent.memory.history, style="bold green")
+                console.print(qa_agent.memory.history, style="bold green")
+                continue
+
+
             console.print("\n" + "─" * 80)
             console.print("\n[bold magenta]🔄 Processing your question...[/bold magenta]")
 

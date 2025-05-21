@@ -65,7 +65,7 @@ async def main():
 
         # Check the memory
         if user_input.lower() in ["memory", "mem"]:
-            console.print(agent.memory.history, style="bold green")
+            console.print(agent.memory.get_memory(), style="bold green")
             continue
 
         # Process the user's input through the agent and get the streaming response
