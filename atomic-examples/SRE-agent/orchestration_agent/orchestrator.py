@@ -18,6 +18,12 @@ from orchestration_agent.tools.calculator import (
     CalculatorToolInputSchema,
     CalculatorToolOutputSchema,
 )
+from orchestration_agent.tools.rag_search import (
+    RAGSearchTool,
+    RAGSearchToolConfig,
+    RAGSearchToolInputSchema,
+    RAGSearchToolOutputSchema,
+)
 
 import instructor
 from datetime import datetime
@@ -37,8 +43,8 @@ class OrchestratorInputSchema(BaseIOSchema):
 class OrchestratorOutputSchema(BaseIOSchema):
     """Combined output schema for the Orchestrator Agent. Contains the tool to use and its parameters."""
 
-    tool: str = Field(..., description="The tool to use: 'search' or 'calculator'")
-    tool_parameters: Union[SearxNGSearchToolInputSchema, CalculatorToolInputSchema] = Field(
+    tool: str = Field(..., description="The tool to use: 'search', 'calculator', or 'rag'")
+    tool_parameters: Union[SearxNGSearchToolInputSchema, CalculatorToolInputSchema, RAGSearchToolInputSchema] = Field(
         ..., description="The parameters for the selected tool"
     )
 
@@ -57,6 +63,7 @@ class OrchestratorAgentConfig(BaseAgentConfig):
 
     searxng_config: SearxNGSearchToolConfig
     calculator_config: CalculatorToolConfig
+    rag_config: RAGSearchToolConfig
 
 
 #####################
@@ -80,15 +87,16 @@ orchestrator_agent = BaseAgent(
         model="gpt-4o-mini",
         system_prompt_generator=SystemPromptGenerator(
             background=[
-                "You are an Orchestrator Agent that decides between using a search tool or a calculator tool based on user input.",
-                "Use the search tool for queries requiring factual information, current events, or specific data.",
+                "You are an Orchestrator Agent that decides between using a search tool, a calculator tool, or a RAG tool based on user input.",
+                "Use the search tool for queries requiring external factual information, current events, or specific data.",
                 "Use the calculator tool for mathematical calculations and expressions.",
+                "Use the RAG tool for questions about internal documentation, knowledge base, or project-specific information. The user will explicitly state if they want to use the RAG tool.",
             ],
             output_instructions=[
-                "Analyze the input to determine whether it requires a web search or a calculation.",
+                "Analyze the input to determine whether it requires a web search, a calculation, or searching in the knowledge base.",
                 "For search queries, use the 'search' tool and provide 1-3 relevant search queries.",
                 "For calculations, use the 'calculator' tool and provide the mathematical expression to evaluate.",
-                "When uncertain, prefer using the search tool.",
+                "For questions about internal documentation or knowledge where the user specifies to use RAG, use the 'rag' tool and provide the question.",
                 "Format the output using the appropriate schema.",
             ],
         ),
@@ -102,12 +110,21 @@ orchestrator_agent.register_context_provider("current_date", CurrentDateProvider
 
 
 def execute_tool(
-    searxng_tool: SearxNGSearchTool, calculator_tool: CalculatorTool, orchestrator_output: OrchestratorOutputSchema
-) -> Union[SearxNGSearchToolOutputSchema, CalculatorToolOutputSchema]:
+    searxng_tool: SearxNGSearchTool, calculator_tool: CalculatorTool, rag_tool: RAGSearchTool, orchestrator_output: OrchestratorOutputSchema
+) -> Union[SearxNGSearchToolOutputSchema, CalculatorToolOutputSchema, RAGSearchToolOutputSchema]:
     if orchestrator_output.tool == "search":
+        # Ensure the parameters are of the correct type for the tool
+        if not isinstance(orchestrator_output.tool_parameters, SearxNGSearchToolInputSchema):
+            raise ValueError(f"Invalid parameters for search tool: {orchestrator_output.tool_parameters}")
         return searxng_tool.run(orchestrator_output.tool_parameters)
     elif orchestrator_output.tool == "calculator":
+        if not isinstance(orchestrator_output.tool_parameters, CalculatorToolInputSchema):
+            raise ValueError(f"Invalid parameters for calculator tool: {orchestrator_output.tool_parameters}")
         return calculator_tool.run(orchestrator_output.tool_parameters)
+    elif orchestrator_output.tool == "rag":
+        if not isinstance(orchestrator_output.tool_parameters, RAGSearchToolInputSchema):
+            raise ValueError(f"Invalid parameters for RAG tool: {orchestrator_output.tool_parameters}")
+        return rag_tool.run(orchestrator_output.tool_parameters)
     else:
         raise ValueError(f"Unknown tool: {orchestrator_output.tool}")
 
@@ -128,8 +145,24 @@ if __name__ == "__main__":
     client = instructor.from_openai(openai.OpenAI(api_key=os.getenv("OPENAI_API_KEY")))
 
     # Initialize the tools
-    searxng_tool = SearxNGSearchTool(SearxNGSearchToolConfig(base_url="http://localhost:8080", max_results=3))
+    searxng_tool = SearxNGSearchTool(SearxNGSearchToolConfig(base_url="http://localhost:8080", max_results=3)) # Replace with your SearxNG instance
     calculator_tool = CalculatorTool(CalculatorToolConfig())
+    # Configure RAG tool - create a knowledge_base directory in the SRE-agent folder or update path
+    # Ensure OPENAI_API_KEY is set in .env or environment
+    knowledge_base_dir = os.path.join(os.path.dirname(__file__), "..", "knowledge_base_sre")
+    os.makedirs(knowledge_base_dir, exist_ok=True)
+    # Add some dummy files to knowledge_base_sre for testing
+    with open(os.path.join(knowledge_base_dir, "sre_handbook.md"), "w") as f:
+        f.write("# SRE Handbook\n\nThis document contains best practices for Site Reliability Engineering.\n\n## Chapter 1: Introduction\nSLOs, SLIs, Error Budgets.")
+    with open(os.path.join(knowledge_base_dir, "incident_response.txt"), "w") as f:
+        f.write("Incident Response Plan:\n1. Identify\n2. Contain\n3. Eradicate\n4. Recover\n5. Lessons Learned.")
+        
+    rag_tool_config = RAGSearchToolConfig(
+        docs_dir=knowledge_base_dir,
+        persist_dir=os.path.join(os.path.dirname(__file__), "..", "sre_chroma_db"),
+        recreate_collection_on_init=True # Set to False after first run if you want to persist DB
+    )
+    rag_tool = RAGSearchTool(config=rag_tool_config)
 
     # Initialize Rich console
     console = Console()
@@ -142,6 +175,8 @@ if __name__ == "__main__":
     inputs = [
         "Who won the Nobel Prize in Physics in 2024?",
         "Please calculate the sine of pi/3 to the third power",
+        "Use RAG to tell me about SLOs from the SRE handbook",
+        "Use RAG to find the incident response plan",
     ]
 
     for user_input in inputs:
@@ -166,7 +201,7 @@ if __name__ == "__main__":
         console.print(orchestrator_syntax)
 
         # Run the selected tool
-        response = execute_tool(searxng_tool, calculator_tool, orchestrator_output)
+        response = execute_tool(searxng_tool, calculator_tool, rag_tool, orchestrator_output)
 
         # Print the tool output
         console.print("\n[bold green]Tool Output:[/bold green]")
