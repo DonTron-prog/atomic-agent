@@ -18,7 +18,7 @@ from orchestration_agent.tools.calculator import (
     CalculatorToolInputSchema,
     CalculatorToolOutputSchema,
 )
-from orchestration_agent.tools.rag_search import ( # Updated import path
+from orchestration_agent.tools.rag_search import ( 
     RAGSearchTool,
     RAGSearchToolConfig,
     RAGSearchToolInputSchema,
@@ -35,9 +35,10 @@ load_dotenv()  # Load environment variables from .env file
 # INPUT/OUTPUT SCHEMAS #
 ########################
 class OrchestratorInputSchema(BaseIOSchema):
-    """Input schema for the Orchestrator Agent. Contains the user's message to be processed."""
+    """Input schema for the SRE Orchestrator Agent. Contains the system alert and its context."""
 
-    chat_message: str = Field(..., description="The user's input message to be analyzed and responded to.")
+    system_alert: str = Field(..., description="The system alert received (e.g., 'High CPU utilization on server X').")
+    system_context: str = Field(..., description="Contextual information about the system experiencing the alert (e.g., 'Production web server, recent deployment v1.2').")
 
 
 class OrchestratorOutputSchema(BaseIOSchema):
@@ -87,17 +88,18 @@ orchestrator_agent = BaseAgent(
         model="gpt-4o-mini",
         system_prompt_generator=SystemPromptGenerator(
             background=[
-                "You are an Orchestrator Agent that decides between using a search tool, a calculator tool, or a RAG tool based on user input.",
-                "Use the search tool for queries requiring external factual information, current events, or specific data.",
-                "Use the calculator tool for mathematical calculations and expressions.",
-                "Use the RAG tool for questions about internal documentation, knowledge base, or project-specific information. The user will explicitly state if they want to use the RAG tool.",
+                "You are an SRE Orchestrator Agent. Your primary role is to analyze a system alert and its associated context. Based on this analysis, you must decide which tool (RAG, web-search, or calculator) will provide the most valuable additional information or context for a subsequent reflection agent to understand and act upon the alert.",
+                "Use the RAG (Retrieval Augmented Generation) tool for querying internal SRE knowledge bases. This includes runbooks, incident histories, post-mortems, architectural diagrams, service dependencies, and internal documentation related to the alerted system or similar past issues.",
+                "Use the web-search tool for finding external information. This includes searching for specific error codes, CVEs (Common Vulnerabilities and Exposures), documentation for third-party software or services, status pages of external dependencies, or general troubleshooting guides from the broader internet.",
+                "Use the calculator tool if the alert involves specific metrics, thresholds, or requires calculations to determine severity, impact (e.g., error budget consumption), or trends.",
             ],
             output_instructions=[
-                "Analyze the input to determine whether it requires a web search, a calculation, or searching in the knowledge base.",
-                "For search queries, use the 'search' tool and provide 1-3 relevant search queries.",
-                "For calculations, use the 'calculator' tool and provide the mathematical expression to evaluate.",
-                "For questions about internal documentation or knowledge where the user specifies to use RAG, use the 'rag' tool and provide the question.",
-                "Format the output using the appropriate schema.",
+                "Carefully analyze the provided 'system_alert' and 'system_context'.",
+                "Determine if the most valuable next step is to: query internal knowledge (RAG), search for external information (web-search), or perform a calculation (calculator).",
+                "If RAG is chosen: use the 'rag' tool. Formulate a specific question for the RAG system based on the alert and context to retrieve relevant internal documentation (e.g., 'Find runbooks for high CPU on web servers', 'Retrieve incident history for ORA-12514 on payment_db').",
+                "If web-search is chosen: use the 'search' tool. Provide 1-3 concise and relevant search queries based on the alert and context (e.g., 'ORA-12514 TNS listener error Oracle', 'Kubernetes Pod CrashLoopBackOff OOMKilled troubleshooting').",
+                "If calculator is chosen: use the 'calculator' tool. Provide the mathematical expression needed (e.g., if latency increased from 50ms to 500ms, an expression could be '500 / 50' to find the factor of increase).",
+                "Format your output strictly according to the OrchestratorOutputSchema.",
             ],
         ),
         input_schema=OrchestratorInputSchema,
@@ -160,7 +162,7 @@ if __name__ == "__main__":
     rag_tool_config = RAGSearchToolConfig(
         docs_dir=knowledge_base_dir,
         persist_dir=os.path.join(os.path.dirname(__file__), "..", "sre_chroma_db"),
-        recreate_collection_on_init=True # Set to False after first run if you want to persist DB
+        recreate_collection_on_init=False # Set to False after first run if you want to persist DB
     )
     rag_tool = RAGSearchTool(config=rag_tool_config)
 
@@ -173,17 +175,29 @@ if __name__ == "__main__":
 
     # Example inputs
     inputs = [
-        "Who won the Nobel Prize in Physics in 2024?",
-        "Please calculate the sine of pi/3 to the third power",
-        "Use RAG to tell me about SLOs from the SRE handbook",
-        "Use RAG to find the incident response plan",
+        {
+            "alert": "High CPU utilization (95%) on server web-prod-01 for 15 minutes.",
+            "context": "System: Production Web Server Cluster (nginx, Python/Flask). Service: Main customer-facing website. Recent changes: New deployment v2.3.1 two hours ago. Known issues: Occasional spikes during peak load. Monitoring tool: Prometheus."
+        },
+        {
+            "alert": "Critical failure: 'ExtPluginReplicationError: Code 7749 - Sync Timeout with AlphaNode' in 'experimental-geo-sync-plugin v0.1.2' on db-primary.",
+            "context": "System: Primary PostgreSQL Database (Version 15.3). Plugin: 'experimental-geo-sync-plugin v0.1.2' (third-party, integrated yesterday for PoC). Service: Attempting geo-replicated read-replica setup. Internal Documentation: Confirmed NO internal documentation or runbooks exist for this experimental plugin or its error codes. Vendor documentation for v0.1.2 is sparse."
+        },
+        {
+            "alert": "Pod CrashLoopBackOff for service 'checkout-service' in Kubernetes cluster 'prod-east-1'. Error log snippet: 'java.lang.OutOfMemoryError: Java heap space'.",
+            "context": "System: Kubernetes microservice (Java Spring Boot). Service: Checkout processing. Resource limits: Memory 512Mi, CPU 0.5 core. Traffic: Experiencing 3x normal load due to flash sale."
+        },
+        {
+            "alert": "API endpoint /api/v2/orders returning 503 Service Unavailable for 5% of requests over the last 10 minutes. Latency P99 is 2500ms.",
+            "context": "System: API Gateway (Kong) and backend OrderService. Service: Order placement. Dependencies: InventoryService, PaymentService. Current error rate threshold: < 1%. Latency SLO: P99 < 800ms."
+        }
     ]
 
-    for user_input in inputs:
-        console.print(Panel(f"[bold cyan]User Input:[/bold cyan] {user_input}", expand=False))
+    for item_input in inputs:
+        console.print(Panel(f"[bold cyan]System Alert:[/bold cyan] {item_input['alert']}\n[bold cyan]System Context:[/bold cyan] {item_input['context']}", expand=False))
 
         # Create the input schema
-        input_schema = OrchestratorInputSchema(chat_message=user_input)
+        input_schema = OrchestratorInputSchema(system_alert=item_input["alert"], system_context=item_input["context"])
 
         # Print the input schema
         console.print("\n[bold yellow]Generated Input Schema:[/bold yellow]")
@@ -210,11 +224,17 @@ if __name__ == "__main__":
 
         console.print("\n" + "-" * 80 + "\n")
 
-        orchestrator_agent.output_schema = FinalAnswerSchema
-        orchestrator_agent.memory.add_message("system", response)
-        final_answer = orchestrator_agent.run(input_schema)
-        console.print(f"\n[bold blue]Final Answer:[/bold blue] {final_answer.final_answer}")
-        orchestrator_agent.output_schema = OrchestratorOutputSchema
+        # The SRE orchestrator's primary output is the tool choice and its parameters.
+        # The output of the selected tool will be consumed by a subsequent reflection agent.
+        # Therefore, generating a "final_answer" here might not be necessary for the SRE pipeline.
+        # If a final summarization or handoff message is needed from this agent, this section can be adapted.
+        # For now, we'll comment it out to focus on the tool selection aspect.
+        #
+        # orchestrator_agent.output_schema = FinalAnswerSchema
+        # orchestrator_agent.memory.add_message("system", response) # 'response' here is the tool's output
+        # final_answer = orchestrator_agent.run(input_schema) # This would re-run the LLM with the tool output in memory
+        # console.print(f"\n[bold blue]Final Answer:[/bold blue] {final_answer.final_answer}")
+        # orchestrator_agent.output_schema = OrchestratorOutputSchema
 
-        # Reset the memory after each response
+        # Reset the memory after each response if you are doing multiple turns in the example
         orchestrator_agent.memory = AgentMemory()
