@@ -320,6 +320,10 @@ if __name__ == "__main__":
             "alert": "API endpoint /api/v2/orders returning 503 Service Unavailable for 5% of requests over the last 10 minutes. Latency P99 is 2500ms.",
             "context": "System: API Gateway (Kong) and backend OrderService. Service: Order placement. Dependencies: InventoryService, PaymentService. Current error rate threshold: < 1%. Latency SLO: P99 < 800ms."
         }
+        #{
+        #    "alert": "High CPU utilization (95%) on server web-prod-01 for 15 minutes.",
+        #    "context": "System: Production Web Server Cluster (nginx, Python/Flask). Service: Main customer-facing website. Recent changes: New deployment v2.3.1 two hours ago. Known issues: Occasional spikes during peak load. Monitoring tool: Prometheus."
+        #},
     ]
     
     run_example_scenarios(
